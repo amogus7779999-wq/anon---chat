@@ -6,49 +6,53 @@ app = Flask(__name__)
 messages = []
 users = {}
 
+OWNER_NAME = "MUDREC"
+
 html = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>👻 Призрак</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { margin:0; font-family:Arial; background:#0f0f0f; color:white; }
-        .top { padding:10px; background:#1a1a1a; text-align:center; }
-        .chat { height:80vh; overflow:auto; padding:10px; }
-        .msg { background:#222; margin:5px 0; padding:8px; border-radius:8px; }
-        .form { display:flex; gap:5px; padding:10px; }
-        input { flex:1; padding:10px; border:none; border-radius:8px; }
-        button { padding:10px; border:none; border-radius:8px; background:#00ff99; }
-        .online { font-size:12px; color:#00ff99; }
-    </style>
+<title>АНОН Н.Ч</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { margin:0; font-family:Arial; background:#0f0f0f; color:white; }
+.top { padding:10px; background:#1a1a1a; text-align:center; }
+.chat { height:70vh; overflow:auto; padding:10px; }
+.msg { background:#222; margin:5px 0; padding:8px; border-radius:8px; }
+.form { display:flex; gap:5px; padding:10px; }
+input { flex:1; padding:10px; border:none; border-radius:8px; }
+button { padding:10px; border:none; border-radius:8px; background:#00ff99; }
+.nick { text-align:center; padding:5px; color:#00ff99; }
+</style>
 </head>
 <body>
 
 <div class="top">
-    👻 Призрак чат
-    <div class="online" id="online"></div>
+<h2>АНОН Н.Ч</h2>
+<div class="nick" id="nickDisplay"></div>
 </div>
 
 <div class="chat" id="chat"></div>
 
 <div class="form">
-    <input id="name" placeholder="Ник">
-    <input id="msg" placeholder="Сообщение">
-    <button onclick="send()">➤</button>
+<input id="msg" placeholder="Сообщение">
+<button onclick="send()">➤</button>
 </div>
 
 <script>
 
-let nameInput = document.getElementById("name");
+let nick = localStorage.getItem("nick");
 
-if(localStorage.getItem("nick")){
-    nameInput.value = localStorage.getItem("nick");
+if(!nick){
+    nick = prompt("Введите ник (изменить потом нельзя):");
+    if(nick){
+        localStorage.setItem("nick", nick);
+    }
+}else{
+    alert("⚠️ Ник можно задать только один раз и изменить нельзя");
 }
 
-nameInput.oninput = () => {
-    localStorage.setItem("nick", nameInput.value);
-}
+document.getElementById("nickDisplay").innerText = "Ты: " + nick;
 
 async function load(){
     let r = await fetch("/messages");
@@ -68,30 +72,20 @@ async function load(){
 }
 
 async function send(){
-    let name = document.getElementById("name").value;
     let msg = document.getElementById("msg").value;
 
     await fetch("/send", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({name, msg})
+        body: JSON.stringify({name: nick, msg})
     });
 
     document.getElementById("msg").value="";
     load();
 }
 
-async function online(){
-    let r = await fetch("/online");
-    let data = await r.json();
-    document.getElementById("online").innerText = "online: " + data.length;
-}
-
 setInterval(load, 1500);
-setInterval(online, 3000);
-
 load();
-online();
 
 </script>
 
@@ -114,29 +108,14 @@ def send():
     msg = data.get("msg")
 
     if name and msg:
-        messages.append(f"{name}: {msg}")
+        if name == OWNER_NAME:
+            messages.append(f"[СОЗДАТЕЛЬ] {name}: {msg}")
+        else:
+            messages.append(f"{name}: {msg}")
+
         users[name] = time.time()
 
     return "ok"
 
-@app.route("/online")
-def online():
-    now = time.time()
-    for u in list(users):
-        if now - users[u] > 10:
-            del users[u]
-    return jsonify(list(users.keys()))
-ADMIN_KEY = "12345"  # можешь поменять
-
-@app.route("/clear/<key>")
-def clear(key):
-    global messages
-
-    if key == ADMIN_KEY:
-        messages = []
-        open("messages.txt", "w").close()
-        return "чат очищен"
-    else:
-        return "доступ запрещен"
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
