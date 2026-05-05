@@ -15,25 +15,91 @@ html = """
 <title>АНОН Н.Ч</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body { margin:0; font-family:Arial; background:#0f0f0f; color:white; }
-.top { padding:10px; background:#1a1a1a; text-align:center; }
-.chat { height:60vh; overflow:auto; padding:10px; }
-.msg { background:#222; margin:5px 0; padding:8px; border-radius:8px; }
-.form { display:flex; gap:5px; padding:10px; }
-input { flex:1; padding:10px; border:none; border-radius:8px; }
-button { padding:10px; border:none; border-radius:8px; background:#00ff99; }
-.nick { text-align:center; color:#00ff99; }
-.avatar { width:30px; height:30px; border-radius:50%; }
-.reactions span { margin-right:5px; cursor:pointer; }
+
+body {
+    margin:0;
+    font-family:Arial;
+    background:#0b141a;
+    color:white;
+}
+
+.top {
+    background:#202c33;
+    padding:10px;
+    text-align:center;
+}
+
+.chat {
+    height:65vh;
+    overflow:auto;
+    padding:10px;
+    display:flex;
+    flex-direction:column;
+}
+
+.message {
+    display:flex;
+    align-items:flex-end;
+    margin:5px 0;
+}
+
+.avatar {
+    width:40px;
+    height:40px;
+    border-radius:50%;
+    object-fit:cover;
+    margin-right:8px;
+}
+
+.bubble {
+    background:#202c33;
+    padding:10px;
+    border-radius:10px;
+    max-width:70%;
+}
+
+.me {
+    align-self:flex-end;
+}
+
+.me .bubble {
+    background:#005c4b;
+}
+
+.reactions span {
+    margin-right:5px;
+    cursor:pointer;
+    font-size:14px;
+}
+
+.form {
+    display:flex;
+    padding:10px;
+    background:#202c33;
+}
+
+input {
+    flex:1;
+    padding:10px;
+    border:none;
+    border-radius:20px;
+}
+
+button {
+    margin-left:5px;
+    padding:10px;
+    border:none;
+    border-radius:20px;
+    background:#00a884;
+}
+
 </style>
 </head>
 <body>
 
 <div class="top">
-<h2>АНОН Н.Ч</h2>
-<div class="nick" id="nickDisplay"></div>
+<h3>АНОН Н.Ч</h3>
 <div id="online"></div>
-<input type="file" id="avatarInput">
 </div>
 
 <div class="chat" id="chat"></div>
@@ -51,45 +117,32 @@ let changes = localStorage.getItem("nick_changes") || 0;
 
 if(!nick){
     nick = prompt("Введите ник:");
-    if(nick){
-        localStorage.setItem("nick", nick);
-        localStorage.setItem("nick_changes", 0);
-    }
+    localStorage.setItem("nick", nick);
+    localStorage.setItem("nick_changes", 0);
 }else{
     if(changes < 3){
         if(confirm("Сменить ник? (макс 3 раза)")){
-            let newNick = prompt("Новый ник:");
-            if(newNick){
-                nick = newNick;
+            let n = prompt("Новый ник:");
+            if(n){
+                nick = n;
                 changes++;
                 localStorage.setItem("nick", nick);
                 localStorage.setItem("nick_changes", changes);
             }
         }
-    }else{
-        alert("Ник больше менять нельзя");
     }
 }
-
-document.getElementById("nickDisplay").innerText = "Ты: " + nick;
-
 
 // --- АВАТАР ---
 let avatar = localStorage.getItem("avatar");
 
-document.getElementById("avatarInput").onchange = function(){
-    let file = this.files[0];
-    let reader = new FileReader();
-
-    reader.onload = function(e){
-        localStorage.setItem("avatar", e.target.result);
-    };
-
-    if(file){
-        reader.readAsDataURL(file);
+if(!avatar){
+    let url = prompt("Вставь ссылку на аватар (или пропусти)");
+    if(url){
+        localStorage.setItem("avatar", url);
+        avatar = url;
     }
-};
-
+}
 
 // --- ЧАТ ---
 async function load(){
@@ -100,8 +153,20 @@ async function load(){
     chat.innerHTML = "";
 
     data.forEach((m, i)=>{
-        let d = document.createElement("div");
-        d.className = "msg";
+
+        let wrap = document.createElement("div");
+        wrap.className = "message";
+
+        if(m.name == nick){
+            wrap.classList.add("me");
+        }
+
+        let img = document.createElement("img");
+        img.src = m.avatar || "";
+        img.className = "avatar";
+
+        let bubble = document.createElement("div");
+        bubble.className = "bubble";
 
         let text = document.createElement("div");
         text.innerText = m.text;
@@ -116,9 +181,13 @@ async function load(){
             reactions.appendChild(span);
         });
 
-        d.appendChild(text);
-        d.appendChild(reactions);
-        chat.appendChild(d);
+        bubble.appendChild(text);
+        bubble.appendChild(reactions);
+
+        wrap.appendChild(img);
+        wrap.appendChild(bubble);
+
+        chat.appendChild(wrap);
     });
 
     chat.scrollTop = chat.scrollHeight;
@@ -156,7 +225,7 @@ async function online(){
     document.getElementById("online").innerText = "онлайн: " + data.length;
 }
 
-setInterval(load, 1500);
+setInterval(load, 1200);
 setInterval(online, 3000);
 
 load();
@@ -190,6 +259,7 @@ def send():
             text = f"{name}: {msg}"
 
         messages.append({
+            "name": name,
             "text": text,
             "avatar": avatar,
             "reactions": {}
@@ -205,7 +275,7 @@ def react():
     mid = data.get("id")
     emoji = data.get("emoji")
 
-    if mid is not None and emoji:
+    if mid is not None:
         if emoji not in messages[mid]["reactions"]:
             messages[mid]["reactions"][emoji] = 0
         messages[mid]["reactions"][emoji] += 1
