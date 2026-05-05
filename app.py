@@ -2,13 +2,25 @@ from flask import Flask, request, render_template_string, jsonify
 
 app = Flask(__name__)
 
+import os
+
 messages = []
+
+def load_messages():
+    if os.path.exists("messages.txt"):
+        with open("messages.txt", "r", encoding="utf-8") as f:
+            return f.read().splitlines()
+    return []
+
+def save_message(msg):
+    with open("messages.txt", "a", encoding="utf-8") as f:
+        f.write(msg + "\n")
 
 html = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Аноним чат</title>
+    <title>👻 Призрак</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
@@ -55,7 +67,7 @@ html = """
 </head>
 <body>
 
-<h2>💬 Аноним чат</h2>
+<h2>👻 Призрак</h2>
 
 <form id="form">
     <input name="name" placeholder="Ник" required>
