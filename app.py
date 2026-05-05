@@ -126,6 +126,17 @@ def online():
         if now - users[u] > 10:
             del users[u]
     return jsonify(list(users.keys()))
+ADMIN_KEY = "12345"  # можешь поменять
 
+@app.route("/clear/<key>")
+def clear(key):
+    global messages
+
+    if key == ADMIN_KEY:
+        messages = []
+        open("messages.txt", "w").close()
+        return "чат очищен"
+    else:
+        return "доступ запрещен"
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
