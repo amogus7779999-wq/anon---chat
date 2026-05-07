@@ -1,65 +1,97 @@
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit
-import time
+import sqlite3, time
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-messages = []
-users = {}
+def db():
+    return sqlite3.connect("chat.db")
 
-OWNER_NAME = "MUDREC"
+def init_db():
+    con = db()
+    cur = con.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender TEXT,
+        receiver TEXT,
+        text TEXT
+    )
+    """)
+
+    con.commit()
+    con.close()
+
+init_db()
+
+users = {}
 
 html = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>АНОН Н.Ч</title>
+<title>PRIZRAK</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
+body { margin:0; font-family:Arial; }
 
-body { margin:0; font-family:Arial; background:#0b141a; color:white; }
+body.light { background:white; color:black; }
+body.dark { background:#0b141a; color:white; }
 
-.top { background:#202c33; padding:10px; text-align:center; }
+.container { display:flex; height:100vh; }
 
-.chat { height:65vh; overflow:auto; padding:10px; display:flex; flex-direction:column; }
+.left { width:30%; padding:10px; overflow:auto; }
+.right { flex:1; display:flex; flex-direction:column; }
 
-.message { display:flex; margin:5px 0; align-items:flex-end; }
+.chat { flex:1; overflow:auto; padding:10px; display:flex; flex-direction:column; }
 
-.avatar { width:40px; height:40px; border-radius:50%; margin-right:8px; }
+.msg { padding:8px; margin:5px; border-radius:10px; max-width:70%; background:#ddd; }
+.dark .msg { background:#202c33; }
+.me { align-self:flex-end; background:#00a884; color:white; }
 
-.bubble { background:#202c33; padding:10px; border-radius:10px; max-width:70%; }
+.user { padding:8px; margin:5px; background:#ccc; cursor:pointer; border-radius:8px; }
+.dark .user { background:#202c33; }
 
-.me { align-self:flex-end; }
+.bottom { display:flex; padding:10px; }
+input { flex:1; padding:10px; border-radius:20px; border:none; }
 
-.me .bubble { background:#005c4b; }
+button { padding:10px; margin-left:5px; border:none; border-radius:20px; }
 
-.reactions span {
-    margin-right:6px;
-    cursor:pointer;
-    font-size:14px;
-}
-
-.form { display:flex; padding:10px; background:#202c33; }
-
-input { flex:1; padding:10px; border:none; border-radius:20px; }
-
-button { margin-left:5px; padding:10px; border:none; border-radius:20px; background:#00a884; }
-
+.settings { position:fixed; top:10px; right:10px; }
 </style>
 </head>
 <body>
 
-<div class="top">
-<h3>АНОН Н.Ч</h3>
-<div id="online"></div>
+<button class="settings" onclick="openSettings()">⚙</button>
+
+<div class="container">
+
+<div class="left">
+<h3 id="title">PRIZRAK</h3>
+<div id="users"></div>
 </div>
+
+<div class="right">
 
 <div class="chat" id="chat"></div>
 
-<div class="form">
-<input id="msg" placeholder="Сообщение">
-<button onclick="send()">➤</button>
+<div class="bottom">
+<input id="msg" placeholder="Message">
+<button onclick="send()" id="sendBtn">Send</button>
+</div>
+
+</div>
+
 </div>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
@@ -70,98 +102,102 @@ let socket = io();
 
 let nick = localStorage.getItem("nick");
 if(!nick){
-    nick = prompt("Введите ник:");
+    nick = prompt("Введите ник");
     localStorage.setItem("nick", nick);
 }
 
-let avatar = localStorage.getItem("avatar");
-if(!avatar){
-    let url = prompt("Ссылка на аватар:");
-    if(url){
-        localStorage.setItem("avatar", url);
-        avatar = url;
+let theme = localStorage.getItem("theme") || "dark";
+setTheme(theme);
+
+let lang = localStorage.getItem("lang") || "ru";
+setLang(lang);
+
+let currentChat = null;
+
+// --- темы ---
+function setTheme(t){
+    document.body.className = t;
+    localStorage.setItem("theme", t);
+}
+
+// --- язык ---
+function setLang(l){
+    localStorage.setItem("lang", l);
+
+    if(l=="ru"){
+        document.getElementById("sendBtn").innerText="Отправить";
+    } else {
+        document.getElementById("sendBtn").innerText="Send";
     }
 }
 
+// --- настройки ---
+function openSettings(){
+    let newNick = prompt("Ник:", nick);
+    if(newNick){
+        nick = newNick;
+        localStorage.setItem("nick", nick);
+    }
+
+    let t = prompt("Тема: light/dark/system");
+    if(t) setTheme(t);
+
+    let l = prompt("Язык: ru/en");
+    if(l) setLang(l);
+}
+
+// --- чат ---
 function send(){
     let msg = document.getElementById("msg").value;
+    if(!currentChat) return alert("Выбери пользователя");
 
-    socket.emit("send_message", {
-        name: nick,
+    socket.emit("private_message", {
+        to: currentChat,
         msg: msg,
-        avatar: avatar
+        from: nick
     });
 
     document.getElementById("msg").value="";
 }
 
-socket.on("load_messages", (data)=>{
-    document.getElementById("chat").innerHTML = "";
-    data.forEach(addMessage);
-});
-
-socket.on("new_message", (m)=>{
-    addMessage(m);
-});
-
-socket.on("update_reactions", (data)=>{
-    loadAll(data);
-});
-
-socket.on("online", (count)=>{
-    document.getElementById("online").innerText = "онлайн: " + count;
-});
-
-function react(id, emoji){
-    socket.emit("react", {id, emoji});
+function openChat(user){
+    currentChat = user;
+    socket.emit("load_private", {with:user});
 }
 
-function loadAll(data){
-    let chat = document.getElementById("chat");
-    chat.innerHTML = "";
-    data.forEach(addMessage);
-}
+socket.on("users", (data)=>{
+    let box = document.getElementById("users");
+    box.innerHTML="";
 
-function addMessage(m, i){
-    let chat = document.getElementById("chat");
+    data.forEach(u=>{
+        if(u.name != nick){
+            let d = document.createElement("div");
+            d.className="user";
+            d.innerText=u.name;
+            d.onclick=()=>openChat(u.name);
+            box.appendChild(d);
+        }
+    });
+});
 
-    let wrap = document.createElement("div");
-    wrap.className = "message";
+socket.on("private_chat", (data)=>{
+    let chat=document.getElementById("chat");
+    chat.innerHTML="";
 
-    if(m.name == nick){
-        wrap.classList.add("me");
-    }
+    data.forEach(m=>{
+        let d=document.createElement("div");
+        d.className="msg";
 
-    let img = document.createElement("img");
-    img.src = m.avatar;
-    img.className = "avatar";
+        if(m.sender==nick) d.classList.add("me");
 
-    let bubble = document.createElement("div");
-    bubble.className = "bubble";
-
-    let text = document.createElement("div");
-    text.innerText = m.text;
-
-    let reactions = document.createElement("div");
-    reactions.className = "reactions";
-
-    ["👍","😂","🔥","❤️"].forEach(e=>{
-        let span = document.createElement("span");
-        let count = m.reactions[e] || 0;
-        span.innerText = e + (count ? " " + count : "");
-        span.onclick = () => react(messages.indexOf(m), e);
-        reactions.appendChild(span);
+        d.innerText=m.sender+": "+m.text;
+        chat.appendChild(d);
     });
 
-    bubble.appendChild(text);
-    bubble.appendChild(reactions);
+    chat.scrollTop=chat.scrollHeight;
+});
 
-    wrap.appendChild(img);
-    wrap.appendChild(bubble);
-
-    chat.appendChild(wrap);
-    chat.scrollTop = chat.scrollHeight;
-}
+socket.emit("join",{name:nick});
 
 </script>
 
@@ -173,50 +209,52 @@ function addMessage(m, i){
 def home():
     return render_template_string(html)
 
-@socketio.on("connect")
-def connect():
-    users[request.sid] = time.time()
-    emit("load_messages", messages)
-    emit("online", len(users), broadcast=True)
+@socketio.on("join")
+def join(data):
+    users[request.sid]={"name":data["name"]}
+    emit("users", list(users.values()), broadcast=True)
 
 @socketio.on("disconnect")
 def disconnect():
-    users.pop(request.sid, None)
-    emit("online", len(users), broadcast=True)
+    users.pop(request.sid,None)
+    emit("users", list(users.values()), broadcast=True)
 
-@socketio.on("send_message")
-def handle_message(data):
-    name = data["name"]
-    msg = data["msg"]
-    avatar = data["avatar"]
+@socketio.on("load_private")
+def load_private(data):
+    user=users[request.sid]["name"]
+    other=data["with"]
 
-    if name == OWNER_NAME:
-        text = f"[СОЗДАТЕЛЬ] {name}: {msg}"
-    else:
-        text = f"{name}: {msg}"
+    con=db()
+    cur=con.cursor()
 
-    m = {
-        "name": name,
-        "text": text,
-        "avatar": avatar,
-        "reactions": {}
-    }
+    cur.execute("""
+    SELECT sender,text FROM messages
+    WHERE (sender=? AND receiver=?)
+       OR (sender=? AND receiver=?)
+    """,(user,other,other,user))
 
-    messages.append(m)
+    rows=cur.fetchall()
+    con.close()
 
-    emit("new_message", m, broadcast=True)
+    msgs=[{"sender":r[0],"text":r[1]} for r in rows]
+    emit("private_chat",msgs)
 
-@socketio.on("react")
-def handle_react(data):
-    mid = data["id"]
-    emoji = data["emoji"]
+@socketio.on("private_message")
+def private_message(data):
+    frm=data["from"]
+    to=data["to"]
+    msg=data["msg"]
 
-    if emoji not in messages[mid]["reactions"]:
-        messages[mid]["reactions"][emoji] = 0
+    con=db()
+    cur=con.cursor()
 
-    messages[mid]["reactions"][emoji] += 1
+    cur.execute("INSERT INTO messages (sender,receiver,text) VALUES (?,?,?)",
+                (frm,to,msg))
 
-    emit("update_reactions", messages, broadcast=True)
+    con.commit()
+    con.close()
 
-if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=10000)
+    load_private({"with":to})
+
+if __name__=="__main__":
+    socketio.run(app,host="0.0.0.0",port=10000)
