@@ -1,6 +1,7 @@
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit
-import sqlite3, time
+import sqlite3
+import time
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -13,18 +14,12 @@ def init_db():
     cur = con.cursor()
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT
-    )
-    """)
-
-    cur.execute("""
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sender TEXT,
         receiver TEXT,
-        text TEXT
+        text TEXT,
+        t REAL
     )
     """)
 
@@ -43,51 +38,103 @@ html = """
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-body { margin:0; font-family:Arial; }
-
-body.light { background:white; color:black; }
-body.dark { background:#0b141a; color:white; }
+body { margin:0; font-family:Arial; background:#0b141a; color:white; }
 
 .container { display:flex; height:100vh; }
 
-.left { width:30%; padding:10px; overflow:auto; }
-.right { flex:1; display:flex; flex-direction:column; }
+/* список чатов */
+.left {
+    width:30%;
+    background:#111b21;
+    padding:10px;
+    overflow:auto;
+}
 
-.chat { flex:1; overflow:auto; padding:10px; display:flex; flex-direction:column; }
+.chat-item {
+    padding:10px;
+    margin:5px;
+    background:#202c33;
+    border-radius:8px;
+    cursor:pointer;
+}
 
-.msg { padding:8px; margin:5px; border-radius:10px; max-width:70%; background:#ddd; }
-.dark .msg { background:#202c33; }
-.me { align-self:flex-end; background:#00a884; color:white; }
+.chat-item:hover {
+    background:#2a3942;
+}
 
-.user { padding:8px; margin:5px; background:#ccc; cursor:pointer; border-radius:8px; }
-.dark .user { background:#202c33; }
+/* чат */
+.right {
+    flex:1;
+    display:flex;
+    flex-direction:column;
+}
 
-.bottom { display:flex; padding:10px; }
-input { flex:1; padding:10px; border-radius:20px; border:none; }
+.header {
+    padding:10px;
+    background:#111b21;
+}
 
-button { padding:10px; margin-left:5px; border:none; border-radius:20px; }
+.chat {
+    flex:1;
+    padding:10px;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+}
 
-.settings { position:fixed; top:10px; right:10px; }
+.msg {
+    background:#202c33;
+    padding:8px;
+    margin:5px;
+    border-radius:10px;
+    max-width:70%;
+}
+
+.me {
+    align-self:flex-end;
+    background:#005c4b;
+}
+
+.bottom {
+    display:flex;
+    padding:10px;
+    background:#111b21;
+}
+
+input {
+    flex:1;
+    padding:10px;
+    border-radius:20px;
+    border:none;
+}
+
+button {
+    margin-left:5px;
+    padding:10px;
+    border-radius:20px;
+    border:none;
+    background:#00a884;
+}
 </style>
 </head>
-<body>
 
-<button class="settings" onclick="openSettings()">⚙</button>
+<body>
 
 <div class="container">
 
-<div class="left">
-<h3 id="title">PRIZRAK</h3>
-<div id="users"></div>
+<div class="left" id="chatList">
+<h3>Чаты</h3>
 </div>
 
 <div class="right">
 
+<div class="header" id="activeChat">Выбери чат</div>
+
 <div class="chat" id="chat"></div>
 
 <div class="bottom">
-<input id="msg" placeholder="Message">
-<button onclick="send()" id="sendBtn">Send</button>
+<input id="msg" placeholder="Сообщение">
+<button onclick="send()">➤</button>
 </div>
 
 </div>
@@ -102,102 +149,71 @@ let socket = io();
 
 let nick = localStorage.getItem("nick");
 if(!nick){
-    nick = prompt("Введите ник");
+    nick = prompt("Введите ник:");
     localStorage.setItem("nick", nick);
 }
 
-let theme = localStorage.getItem("theme") || "dark";
-setTheme(theme);
-
-let lang = localStorage.getItem("lang") || "ru";
-setLang(lang);
-
 let currentChat = null;
+let chats = {};
 
-// --- темы ---
-function setTheme(t){
-    document.body.className = t;
-    localStorage.setItem("theme", t);
-}
-
-// --- язык ---
-function setLang(l){
-    localStorage.setItem("lang", l);
-
-    if(l=="ru"){
-        document.getElementById("sendBtn").innerText="Отправить";
-    } else {
-        document.getElementById("sendBtn").innerText="Send";
-    }
-}
-
-// --- настройки ---
-function openSettings(){
-    let newNick = prompt("Ник:", nick);
-    if(newNick){
-        nick = newNick;
-        localStorage.setItem("nick", nick);
-    }
-
-    let t = prompt("Тема: light/dark/system");
-    if(t) setTheme(t);
-
-    let l = prompt("Язык: ru/en");
-    if(l) setLang(l);
-}
-
-// --- чат ---
+// --- отправка ---
 function send(){
     let msg = document.getElementById("msg").value;
-    if(!currentChat) return alert("Выбери пользователя");
+    if(!currentChat) return;
 
-    socket.emit("private_message", {
+    socket.emit("msg", {
         to: currentChat,
-        msg: msg,
-        from: nick
+        from: nick,
+        msg: msg
     });
 
     document.getElementById("msg").value="";
 }
 
+// --- открыть чат ---
 function openChat(user){
     currentChat = user;
-    socket.emit("load_private", {with:user});
+    document.getElementById("activeChat").innerText = user;
+    socket.emit("load", {with:user});
 }
 
-socket.on("users", (data)=>{
-    let box = document.getElementById("users");
-    box.innerHTML="";
+// --- список чатов ---
+socket.on("chat_list", (data)=>{
+    let box = document.getElementById("chatList");
+    box.innerHTML = "<h3>Чаты</h3>";
 
     data.forEach(u=>{
-        if(u.name != nick){
+        if(u != nick){
             let d = document.createElement("div");
-            d.className="user";
-            d.innerText=u.name;
-            d.onclick=()=>openChat(u.name);
+            d.className = "chat-item";
+            d.innerText = u;
+            d.onclick = ()=>openChat(u);
             box.appendChild(d);
         }
     });
 });
 
-socket.on("private_chat", (data)=>{
-    let chat=document.getElementById("chat");
-    chat.innerHTML="";
+// --- сообщения ---
+socket.on("messages", (data)=>{
+    let chat = document.getElementById("chat");
+    chat.innerHTML = "";
 
     data.forEach(m=>{
-        let d=document.createElement("div");
-        d.className="msg";
+        let d = document.createElement("div");
+        d.className = "msg";
 
-        if(m.sender==nick) d.classList.add("me");
+        if(m.from == nick){
+            d.classList.add("me");
+        }
 
-        d.innerText=m.sender+": "+m.text;
+        d.innerText = m.from + ": " + m.msg;
         chat.appendChild(d);
     });
 
-    chat.scrollTop=chat.scrollHeight;
+    chat.scrollTop = chat.scrollHeight;
 });
 
-socket.emit("join",{name:nick});
+socket.emit("join", {name:nick});
 
 </script>
 
@@ -209,52 +225,51 @@ socket.emit("join",{name:nick});
 def home():
     return render_template_string(html)
 
+# --- вход ---
 @socketio.on("join")
 def join(data):
-    users[request.sid]={"name":data["name"]}
-    emit("users", list(users.values()), broadcast=True)
+    users[request.sid] = data["name"]
 
-@socketio.on("disconnect")
-def disconnect():
-    users.pop(request.sid,None)
-    emit("users", list(users.values()), broadcast=True)
+    emit("chat_list", list(set(users.values())), broadcast=True)
 
-@socketio.on("load_private")
-def load_private(data):
-    user=users[request.sid]["name"]
-    other=data["with"]
-
-    con=db()
-    cur=con.cursor()
+# --- сообщения ---
+@socketio.on("msg")
+def msg(data):
+    con = db()
+    cur = con.cursor()
 
     cur.execute("""
-    SELECT sender,text FROM messages
-    WHERE (sender=? AND receiver=?)
-       OR (sender=? AND receiver=?)
-    """,(user,other,other,user))
-
-    rows=cur.fetchall()
-    con.close()
-
-    msgs=[{"sender":r[0],"text":r[1]} for r in rows]
-    emit("private_chat",msgs)
-
-@socketio.on("private_message")
-def private_message(data):
-    frm=data["from"]
-    to=data["to"]
-    msg=data["msg"]
-
-    con=db()
-    cur=con.cursor()
-
-    cur.execute("INSERT INTO messages (sender,receiver,text) VALUES (?,?,?)",
-                (frm,to,msg))
+    INSERT INTO messages (sender, receiver, text, t)
+    VALUES (?, ?, ?, ?)
+    """, (data["from"], data["to"], data["msg"], time.time()))
 
     con.commit()
     con.close()
 
-    load_private({"with":to})
+    load({"with": data["to"]})
 
-if __name__=="__main__":
-    socketio.run(app,host="0.0.0.0",port=10000)
+# --- загрузка чата ---
+@socketio.on("load")
+def load(data):
+    user = users[request.sid]
+    other = data["with"]
+
+    con = db()
+    cur = con.cursor()
+
+    cur.execute("""
+    SELECT sender, text FROM messages
+    WHERE (sender=? AND receiver=?)
+       OR (sender=? AND receiver=?)
+    ORDER BY t
+    """, (user, other, other, user))
+
+    rows = cur.fetchall()
+    con.close()
+
+    msgs = [{"from": r[0], "msg": r[1]} for r in rows]
+
+    emit("messages", msgs)
+
+if __name__ == "__main__":
+    socketio.run(app, host="0.0.0.0", port=10000)
